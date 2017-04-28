@@ -4,20 +4,27 @@
                                               site-defaults api-defaults
                                               secure-site-defaults secure-api-defaults]]
             #_[ring.middleware.session.cookie :refer [cookie-store]]
-            [ring.middleware.session.memory :refer [memory-store]]
+            #_[ring.middleware.session.memory :refer [memory-store]]
             [ring.logger :refer [wrap-with-logger]]
             [ring.middleware.gzip :refer [wrap-gzip]]
+            [buddy.auth.middleware :refer [wrap-authentication]]
+            [buddy.auth.backends :as backends]
             [ow.chatterbox.middleware.exceptions :refer [wrap-exceptions]]))
 
-(defn- wrap-site [handler {:keys [dev? sessionkey] :as cfg}]
+(defn- wrap-site [handler {:keys [dev? sessionkey jws-secret] :as cfg}]
   (let [#_cookie-store-args #_(if sessionkey
                             [{:key sessionkey}]
-                            [])]
+                            [])
+        jws-backend (backends/jws {:secret (or jws-secret
+                                               (str (rand-int Integer/MAX_VALUE)) ;; TODO: come up with something better
+                                               )})]
     (-> handler
+        (wrap-authentication jws-backend)
         (wrap-defaults (-> (if dev?
                              site-defaults
                              (assoc secure-site-defaults :proxy true))
-                           (assoc-in [:session :store]
+                           (dissoc :session) ;; because we're using jws
+                           #_(assoc-in [:session :store]
                                      #_(cookie-store cookie-store-args)
                                      (memory-store))))
         wrap-with-logger
@@ -29,10 +36,7 @@
       wrap-with-logger
       wrap-gzip))
 
-(defn- wrap-ws [handler cfg]
-  (-> handler
-      wrap-with-logger
-      wrap-gzip))
+(def ^:private wrap-ws wrap-api)
 
 (defn wrap-app [{:keys [site-handler api-handler ws-handler
                         api-prefix ws-prefix]
