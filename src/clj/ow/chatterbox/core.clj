@@ -9,7 +9,7 @@
             [ring.middleware.gzip :refer [wrap-gzip]]
             [ow.chatterbox.middleware.exceptions :refer [wrap-exceptions]]))
 
-(defn- wrap-site [handler & {:keys [dev? sessionkey] :as cfg}]
+(defn- wrap-site [handler {:keys [dev? sessionkey] :as cfg}]
   (let [#_cookie-store-args #_(if sessionkey
                             [{:key sessionkey}]
                             [])]
@@ -23,6 +23,16 @@
         wrap-with-logger
         (wrap-exceptions :expose-errors? dev?)
         wrap-gzip)))
+
+(defn- wrap-api [handler cfg]
+  (-> handler
+      wrap-with-logger
+      wrap-gzip))
+
+(defn- wrap-ws [handler cfg]
+  (-> handler
+      wrap-with-logger
+      wrap-gzip))
 
 (defn wrap-app [{:keys [site-handler api-handler ws-handler
                         api-prefix ws-prefix]
@@ -41,12 +51,16 @@
            true)]
    :post (fn? %)}
 
-  (let [api-pattern (and api-prefix (re-pattern (str "^" api-prefix)))
+  (let [wrapped-site-handler (and site-handler (wrap-site site-handler cfg))
+        wrapped-api-handler (and api-handler (wrap-api api-handler cfg))
+        wrapped-ws-handler (and ws-handler (wrap-ws ws-handler cfg))
+
+        api-pattern (and api-prefix (re-pattern (str "^" api-prefix)))
         ws-pattern (and ws-prefix (re-pattern (str "^" ws-prefix)))]
 
     (fn [{:keys [uri] :as req}]
       (condp #(and %1 %2 (re-find %1 %2)) uri
-        ws-pattern (ws-handler req)
-        api-pattern (api-handler req)
-        (when site-handler
-          (site-handler req))))))
+        ws-pattern (wrapped-ws-handler req)
+        api-pattern (wrapped-api-handler req)
+        (when wrapped-site-handler
+          (wrapped-site-handler req))))))

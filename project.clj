@@ -8,7 +8,7 @@
                  [com.stuartsierra/component "0.3.2"]
                  [http-kit "2.2.0"]
                  [ring/ring-defaults "0.2.3"]
-                 [ring.middleware.conditional "0.2.0"]
+                 ;;;[ring.middleware.conditional "0.2.0"]
                  [bk/ring-gzip "0.2.1"]
                  [ring-logger "0.7.7"]
                  [com.taoensso/sente "1.11.0"]
