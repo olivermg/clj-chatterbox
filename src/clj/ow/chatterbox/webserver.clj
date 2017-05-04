@@ -112,56 +112,56 @@
            '[buddy.auth :refer [authenticated? throw-unauthorized]])
 
   (def cfg1 (let [jsecret-api "foofoo"
-                            jsecret-ws "barbar"
-                            ssecret "xyzxyz0123456789" ;; must be 16 bytes
-                            userid {:user 123
-                                    :scope :web}
+                  jsecret-ws "barbar"
+                  ssecret "xyzxyz0123456789" ;; must be 16 bytes
+                  userid {:user 123
+                          :scope :web}
 
-                            site-handler (fn [req]
-                                           (println "site")
-                                           (case (:uri req)
-                                             "/login" {:status 200
-                                                       :session (assoc (:session req) :identity userid)}
-                                             "/authed" (do (when (not (authenticated? req))
-                                                             (throw-unauthorized {:message "not authorized for site"}))
-                                                           {:status 200
-                                                            :body "private site content"})
-                                             {:status 200
-                                              :body "public site content"}))
+                  site-handler (fn [req]
+                                 (println "site")
+                                 (case (:uri req)
+                                   "/login" {:status 200
+                                             :session (assoc (:session req) :identity userid)}
+                                   "/authed" (do (when (not (authenticated? req))
+                                                   (throw-unauthorized {:message "not authorized for site"}))
+                                                 {:status 200
+                                                  :body "private site content"})
+                                   {:status 200
+                                    :body "public site content"}))
 
-                            api-handler (fn [req]
-                                          (println "api")
-                                          (case (:uri req)
-                                            "/api/login" {:status 200
-                                                          :body (str "{ \"token\": \""
-                                                                     (jwt/sign userid jsecret-api)
-                                                                     "\" }")
-                                                          :headers {"Content-Type" "application/json"}}
-                                            "/api/authed" (do (when (not (authenticated? req))
-                                                                (throw-unauthorized {:message "not authorized for api"}))
-                                                              {:status 200
-                                                               :body "private api content"
-                                                               :headers {"Content-Type" "application/json"}})
-                                            {:status 200
-                                             :body "public api content"
-                                             :headers {"Content-Type" "application/json"}}))
+                  api-handler (fn [req]
+                                (println "api")
+                                (case (:uri req)
+                                  "/api/login" {:status 200
+                                                :body (str "{ \"token\": \""
+                                                           (jwt/sign userid jsecret-api)
+                                                           "\" }")
+                                                :headers {"Content-Type" "application/json"}}
+                                  "/api/authed" (do (when (not (authenticated? req))
+                                                      (throw-unauthorized {:message "not authorized for api"}))
+                                                    {:status 200
+                                                     :body "private api content"
+                                                     :headers {"Content-Type" "application/json"}})
+                                  {:status 200
+                                   :body "public api content"
+                                   :headers {"Content-Type" "application/json"}}))
 
-                            ws-handler (fn [req]
-                                         (println "ws")
-                                         {:status 200
-                                          :body "public ws content"})]
+                  ws-handler (fn [req]
+                               (println "ws")
+                               {:status 200
+                                :body "public ws content"})]
 
-                        {:server {:port 8899}
-                         :all {:dev? true}
-                         :site {:handler site-handler
-                                :unauthorized-redirect "/login"
-                                :cookie-session-secret ssecret}
-                         :api {:handler api-handler
-                               :prefix "/api/"
-                               :jws-secret jsecret-api}
-                         :ws {:handler ws-handler
-                              :prefix "/ws/"
-                              :jws-secret jsecret-ws}}))
+              {:server {:port 8899}
+               :all {:dev? true}
+               :site {:handler site-handler
+                      :unauthorized-redirect "/login"
+                      :cookie-session-secret ssecret}
+               :api {:handler api-handler
+                     :prefix "/api/"
+                     :jws-secret jsecret-api}
+               :ws {:handler ws-handler
+                    :prefix "/ws/"
+                    :jws-secret jsecret-ws}}))
 
   (def ws1 (webserver cfg1))
 
