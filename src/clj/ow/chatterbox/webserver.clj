@@ -11,6 +11,8 @@
             [ring.middleware.gzip :refer [wrap-gzip]]
             [buddy.auth.middleware :refer [wrap-authentication wrap-authorization]]
             [buddy.auth.backends :as backends]
+            [taoensso.sente :as sente]
+            [taoensso.sente.server-adapters.http-kit :refer [get-sch-adapter]]
             [ow.chatterbox.middleware.exceptions :refer [wrap-exceptions]]
             [ow.chatterbox.util :refer [random-string]]))
 
@@ -55,9 +57,11 @@
 
 (defn- wrap-app [{{site-handler :handler :as site-cfg} :site
                   {api-handler :handler api-prefix :prefix :as api-cfg} :api
-                  {ws-handler :handler ws-prefix :prefix :as ws-cfg} :ws
+                  {ws-handler-setup :handler-setup ws-prefix :prefix :as ws-cfg} :ws
                   all-cfg :all
-                  :as cfg}]
+                  :as cfg}
+                 {:keys [ajax-post-fn ajax-get-or-ws-handshake-fn ch-recv send-fn connected-uids]
+                  :as senteobjs}]
 
   {:pre [(if site-handler
            (fn? site-handler)
@@ -65,41 +69,50 @@
          (if (or api-handler api-prefix)
            (fn? api-handler)
            true)
-         (if (or ws-handler ws-prefix)
-           (fn? ws-handler)
+         (if (or ws-handler-setup ws-prefix)
+           (fn? ws-handler-setup)
            true)]
    :post (fn? %)}
 
   (let [wrapped-site-handler (and site-handler (wrap-site site-handler (merge all-cfg site-cfg)))
         wrapped-api-handler (and api-handler (wrap-api api-handler (merge all-cfg api-cfg)))
-        wrapped-ws-handler (and ws-handler (wrap-ws ws-handler (merge all-cfg ws-cfg)))
+        ws-handler (fn [{:keys [request-method] :as req}]
+                     (case request-method
+                       :get (ajax-get-or-ws-handshake-fn req)
+                       :post (ajax-post-fn req)))
 
         api-pattern (and api-prefix (re-pattern (str "^" api-prefix)))
         ws-pattern (and ws-prefix (re-pattern (str "^" ws-prefix)))]
 
+    ;;; setup ws async listener:
+    (when ws-handler-setup
+      (ws-handler-setup ch-recv send-fn connected-uids))
+
     (fn [{:keys [uri] :as req}]
       (condp #(and %1 %2 (re-find %1 %2)) uri
-        ws-pattern (wrapped-ws-handler req)
+        ws-pattern (ws-handler req)
         api-pattern (wrapped-api-handler req)
         (when wrapped-site-handler
           (wrapped-site-handler req))))))
 
 (defrecord Webserver [cfg
-                      server]
+                      server senteobjs]
 
   c/Lifecycle
 
   (start [this]
     (if-not server
-      (let [app (wrap-app cfg)
-            srv (hsrv/run-server app (:server cfg))]
-        (assoc this :server srv))
+      (let [senteobjs (sente/make-channel-socket! (get-sch-adapter) {})
+            app (wrap-app cfg senteobjs)
+            srv (hsrv/run-server app (merge {:worker-name-prefix "http-worker-"}
+                                            (:server cfg)))]
+        (assoc this :server srv :senteobjs senteobjs))
       this))
 
   (stop [this]
     (if server
       (do (server :timeout 20000)
-          (dissoc this :server))
+          (dissoc this :server :senteobjs))
       this)))
 
 (defn webserver [cfg]
@@ -109,7 +122,8 @@
 (comment
 
   (require '[buddy.sign.jwt :as jwt]
-           '[buddy.auth :refer [authenticated? throw-unauthorized]])
+           '[buddy.auth :refer [authenticated? throw-unauthorized]]
+           '[clojure.core.async :refer [go-loop <!]])
 
   (def cfg1 (let [jsecret-api "foofoo"
                   jsecret-ws "barbar"
@@ -146,10 +160,13 @@
                                    :body "public api content"
                                    :headers {"Content-Type" "application/json"}}))
 
-                  ws-handler (fn [req]
-                               (println "ws")
-                               {:status 200
-                                :body "public ws content"})]
+                  ws-handler-setup (fn [ch-recv send-fn connected-uids]
+                                     (println "ws setup")
+                                     (go-loop [{:keys [?reply-fn] :as req} (<! ch-recv)]
+                                       (println "got ws request:" req)
+                                       (when ?reply-fn
+                                         (?reply-fn {:foo "bar"})
+                                         (recur (<! ch-recv)))))]
 
               {:server {:port 8899}
                :all {:dev? true}
@@ -159,9 +176,8 @@
                :api {:handler api-handler
                      :prefix "/api/"
                      :jws-secret jsecret-api}
-               :ws {:handler ws-handler
-                    :prefix "/ws/"
-                    :jws-secret jsecret-ws}}))
+               :ws {:handler-setup ws-handler-setup
+                    :prefix "/ws"}}))
 
   (def ws1 (webserver cfg1))
 
