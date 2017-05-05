@@ -112,7 +112,7 @@
   (stop [this]
     (if server
       (do (server :timeout 20000)
-          (dissoc this :server :senteobjs))
+          (assoc this :server nil :senteobjs nil))
       this)))
 
 (defn webserver [cfg]
